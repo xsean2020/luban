@@ -126,7 +126,7 @@ public class DefaultTextProvider : ITextProvider
             {
                 foreach (var record in GenerationContext.Current.GetTableAllDataList(table))
                 {
-                    record.Data = (DBean)record.Data.Apply(trans,table.ValueTType);
+                    record.Data = (DBean)record.Data.Apply(trans, table.ValueTType);
                 }
             }
         }
