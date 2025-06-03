@@ -36,7 +36,7 @@ public class AutoTableImporter : ITableImporter
             }
             string fileNameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
             var match = fileNamePattern.Match(fileNameWithoutExt);
-            if (!match.Success || match.Groups.Count <=1)
+            if (!match.Success || match.Groups.Count <= 1)
             {
                 continue;
             }
@@ -50,6 +50,9 @@ public class AutoTableImporter : ITableImporter
             string tableName = string.Format(tableNameFormatStr, rawTableName);
             string valueTypeFullName = TypeUtil.MakeFullName(tableNamespace, string.Format(valueTypeNameFormatStr, rawTableName));
 
+            // 检查是否需要分类
+
+            List<string> list = new List<string>();
             // 打开 Excel 文件，遍历所有 Sheet
             using (var stream = File.Open(file, FileMode.Open, FileAccess.Read))
             using (var reader = ExcelReaderFactory.CreateReader(stream))
@@ -58,8 +61,9 @@ public class AutoTableImporter : ITableImporter
                 foreach (DataTable sheet in dataSet.Tables)
                 {
                     match = fileNamePattern.Match(sheet.TableName); // # 开头的不导出
-                    if (!match.Success || match.Groups.Count <=1)
+                    if (!match.Success || match.Groups.Count <= 1)
                     {
+                        list.Add(sheet.TableName + "@" + relativePath);
                         continue;
                     }
 
@@ -84,6 +88,26 @@ public class AutoTableImporter : ITableImporter
                     tables.Add(table);
                 }
             }
+
+            if (list.Count > 0)
+            { 
+                var table = new RawTable()
+                    {
+                        Namespace = tableNamespace,
+                        Name = tableName ,
+                        Index = "",
+                        ValueType = valueTypeFullName ,
+                        ReadSchemaFromFile = true,
+                        Mode = TableMode.MAP,
+                        Comment = "Import by auto",
+                        Groups = new List<string> { },
+                        InputFiles = list,
+                        OutputFile = "",
+                    };
+                    s_logger.Info("import table file:{@}", list);
+                    tables.Add(table);
+            }
+            ;
         }
         return tables;
     }
