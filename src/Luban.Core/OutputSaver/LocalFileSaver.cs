@@ -1,6 +1,8 @@
 using Luban.Utils;
+using System.Text.RegularExpressions;
 
 namespace Luban.OutputSaver;
+
 
 [OutputSaver("local")]
 public class LocalFileSaver : OutputSaverBase
@@ -17,14 +19,15 @@ public class LocalFileSaver : OutputSaverBase
         FileCleaner.Clean(outputDir, outputFileManifest.DataFiles.Select(f => f.File).ToList());
     }
 
+
     public override void SaveFile(OutputFileManifest fileManifest, string outputDir, OutputFile outputFile)
     {
-        string fullOutputPath = $"{outputDir}/{outputFile.File}";
+        string fullOutputPath = $"{outputDir}/{outputFile.File.ToLower()}";
         Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath));
         string tag = File.Exists(fullOutputPath) ? "overwrite" : "new";
         if (FileUtil.WriteAllBytes(fullOutputPath, outputFile.GetContentBytes()))
         {
-            s_logger.Info("[{0}] {1} ", tag, fullOutputPath);
+            s_logger.Info("[{0}] {1} {2} ", fileManifest.TargetName, tag, fullOutputPath);
         }
     }
 }

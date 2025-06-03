@@ -5,6 +5,7 @@ using Luban.Utils;
 using System.Text.RegularExpressions;
 using ExcelDataReader;
 using System.Data;
+using System.Globalization;
 
 namespace Luban.Schema.Builtin;
 
@@ -12,14 +13,30 @@ namespace Luban.Schema.Builtin;
 public class AutoTableImporter : ITableImporter
 {
     private static readonly NLog.Logger s_logger = NLog.LogManager.GetCurrentClassLogger();
+
+
+
+    static string CapitalizeFirstLetter(string str)
+    {
+        if (string.IsNullOrEmpty(str))
+        {
+            return str;
+        }
+        // 使用 CultureInfo 处理首字母大写
+        TextInfo textInfo = CultureInfo.CurrentCulture.TextInfo;
+        return textInfo.ToTitleCase(str.ToLower());  // 将整个字符串变为标题形式，首字母大写
+    }
     public List<RawTable> LoadImportTables()
     {
         string dataDir = GenerationContext.GlobalConf.InputDataDir;
         string fileNamePatternStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "filePattern", false, "#(.*)");
+        string groupNamePatternStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "groupPattern", false, @"#(.*?)\|(.*)");
+
         string tableNamespaceFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "tableNamespaceFormat", false, "{0}");
-        string tableNameFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "tableNameFormat", false, "Tbl{0}");
+        string tableNameFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "tableNameFormat", false, "Tb{0}");
         string valueTypeNameFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "valueTypeNameFormat", false, "{0}");
         var fileNamePattern = new Regex(fileNamePatternStr);
+        var groupNamePattern = new Regex(groupNamePatternStr);
         var excelExts = new HashSet<string> { "xlsx", "xls", "xlsm", "csv" };
         var tables = new List<RawTable>();
         foreach (string file in Directory.GetFiles(dataDir, "*", SearchOption.AllDirectories))
@@ -49,65 +66,53 @@ public class AutoTableImporter : ITableImporter
             string tableNamespace = TypeUtil.MakeFullName(namespaceFromRelativePath, string.Format(tableNamespaceFormatStr, rawTableNamespace));
             string tableName = string.Format(tableNameFormatStr, rawTableName);
             string valueTypeFullName = TypeUtil.MakeFullName(tableNamespace, string.Format(valueTypeNameFormatStr, rawTableName));
-
             // 检查是否需要分类
 
-            List<string> list = new List<string>();
             // 打开 Excel 文件，遍历所有 Sheet
             using (var stream = File.Open(file, FileMode.Open, FileAccess.Read))
             using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
                 var dataSet = reader.AsDataSet();
+                Dictionary<string, List<string>> groups = new Dictionary<string, List<string>>();
+                Dictionary<string, string> valueType = new Dictionary<string, string>();
                 foreach (DataTable sheet in dataSet.Tables)
                 {
                     match = fileNamePattern.Match(sheet.TableName); // # 开头的不导出
                     if (!match.Success || match.Groups.Count <= 1)
                     {
-                        list.Add(sheet.TableName + "@" + relativePath);
                         continue;
                     }
+                    var sheetName = CapitalizeFirstLetter(match.Groups[1].Value);
+                    var groupMatch = groupNamePattern.Match(sheet.TableName);
+                    var groupName = tableName + sheetName;
+                    if (groupMatch.Success && groupMatch.Groups.Count == 3)
+                    {
+                        groupName = tableName + groupMatch.Groups[2].Value;
+                    }
+                    if (!groups.ContainsKey(groupName))
+                    {
+                        groups[groupName] = new List<string>();  // 创建新的 List<string>
+                        valueType[groupName] = valueTypeFullName + sheetName;
+                    }
+                    groups[groupName].Add(sheet.TableName + "@" + relativePath);
+                }
 
-
-                    var sheetName = match.Groups[1].Value;
-
-                    string input = sheet.TableName + "@" + relativePath;
+                foreach (var kvp in groups)
+                {
                     var table = new RawTable()
                     {
                         Namespace = tableNamespace,
-                        Name = tableName + sheetName,
-                        Index = "",
-                        ValueType = valueTypeFullName + sheetName,
+                        Name = kvp.Key,
+                        ValueType = valueType[kvp.Key],
                         ReadSchemaFromFile = true,
                         Mode = TableMode.MAP,
                         Comment = "Import by auto",
-                        Groups = new List<string> { },
-                        InputFiles = new List<string> { input },
-                        OutputFile = "",
+                        InputFiles = kvp.Value,
                     };
-                    s_logger.Info("import table file:{@}", input);
+                    s_logger.Info("Import {0} from {1}", kvp.Key, string.Join(" ", kvp.Value));
                     tables.Add(table);
                 }
             }
-
-            if (list.Count > 0)
-            { 
-                var table = new RawTable()
-                    {
-                        Namespace = tableNamespace,
-                        Name = tableName ,
-                        Index = "",
-                        ValueType = valueTypeFullName ,
-                        ReadSchemaFromFile = true,
-                        Mode = TableMode.MAP,
-                        Comment = "Import by auto",
-                        Groups = new List<string> { },
-                        InputFiles = list,
-                        OutputFile = "",
-                    };
-                    s_logger.Info("import table file:{@}", list);
-                    tables.Add(table);
-            }
-            ;
         }
         return tables;
     }
