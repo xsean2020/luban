@@ -1,5 +1,4 @@
-﻿
-using Luban.Defs;
+﻿using Luban.Defs;
 using Luban.RawDefs;
 using Luban.Utils;
 using System.Text.RegularExpressions;
@@ -29,20 +28,19 @@ public class AutoTableImporter : ITableImporter
     public List<RawTable> LoadImportTables()
     {
         string dataDir = GenerationContext.GlobalConf.InputDataDir;
-        string fileNamePatternStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "filePattern", false, "#(.*)");
-        string groupNamePatternStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "groupPattern", false, @"#(.*?)\|(.*)");
-
         string tableNamespaceFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "tableNamespaceFormat", false, "{0}");
         string tableNameFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "tableNameFormat", false, "Tb{0}");
         string valueTypeNameFormatStr = EnvManager.Current.GetOptionOrDefault("tableImporter", "valueTypeNameFormat", false, "{0}");
-        var fileNamePattern = new Regex(fileNamePatternStr);
-        var groupNamePattern = new Regex(groupNamePatternStr);
+        var fileNamePattern = new Regex(EnvManager.Current.GetOptionOrDefault("tableImporter", "filePattern", false, "^[A-Za-z0-9]+$"));
+        var sheetNamePattern = new Regex(EnvManager.Current.GetOptionOrDefault("tableImporter", "sheetPattern", false, @"^[A-Za-z0-9_]+(?:\|([A-Za-z0-9_]+))?$"));
+
         var excelExts = new HashSet<string> { "xlsx", "xls", "xlsm", "csv" };
         var tables = new List<RawTable>();
         foreach (string file in Directory.GetFiles(dataDir, "*", SearchOption.AllDirectories))
         {
             if (FileUtil.IsIgnoreFile(dataDir, file))
             {
+                s_logger.Info("Ignore file {0}", file);
                 continue;
             }
             string fileName = Path.GetFileName(file);
@@ -52,15 +50,15 @@ public class AutoTableImporter : ITableImporter
                 continue;
             }
             string fileNameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-            var match = fileNamePattern.Match(fileNameWithoutExt);
-            if (!match.Success || match.Groups.Count <= 1)
+            if (!fileNamePattern.IsMatch(fileNameWithoutExt))
             {
+                s_logger.Info("Ignore file {0}", fileName);
                 continue;
             }
 
             string relativePath = file.Substring(dataDir.Length + 1).TrimStart('\\').TrimStart('/');
             string namespaceFromRelativePath = Path.GetDirectoryName(relativePath).Replace('/', '.').Replace('\\', '.');
-            string rawTableFullName = match.Groups[1].Value;
+            string rawTableFullName = fileNameWithoutExt;
             string rawTableNamespace = TypeUtil.GetNamespace(rawTableFullName);
             string rawTableName = TypeUtil.GetName(rawTableFullName);
             string tableNamespace = TypeUtil.MakeFullName(namespaceFromRelativePath, string.Format(tableNamespaceFormatStr, rawTableNamespace));
@@ -77,22 +75,19 @@ public class AutoTableImporter : ITableImporter
                 Dictionary<string, string> valueType = new Dictionary<string, string>();
                 foreach (DataTable sheet in dataSet.Tables)
                 {
-                    match = fileNamePattern.Match(sheet.TableName); // # 开头的不导出
-                    if (!match.Success || match.Groups.Count <= 1)
+                    var match = sheetNamePattern.Match(sheet.TableName); // # 开头的不导出
+                    if (!match.Success)
                     {
+                        s_logger.Info("Ignore file {0} @ sheet {1}", file, sheet.TableName);
                         continue;
                     }
-                    var sheetName = CapitalizeFirstLetter(match.Groups[1].Value);
-                    var groupMatch = groupNamePattern.Match(sheet.TableName);
-                    var groupName = tableName + sheetName;
-                    if (groupMatch.Success && groupMatch.Groups.Count == 3)
-                    {
-                        groupName = tableName + groupMatch.Groups[2].Value;
-                    }
+
+                    var typeName = (match.Groups.Count > 1 && !string.IsNullOrEmpty(match.Groups[1].Value)) ? CapitalizeFirstLetter(match.Groups[1].Value) : CapitalizeFirstLetter(sheet.TableName);
+                    var groupName = tableName + typeName;
                     if (!groups.ContainsKey(groupName))
                     {
                         groups[groupName] = new List<string>();  // 创建新的 List<string>
-                        valueType[groupName] = valueTypeFullName + sheetName;
+                        valueType[groupName] = valueTypeFullName + typeName;
                     }
                     groups[groupName].Add(sheet.TableName + "@" + relativePath);
                 }
